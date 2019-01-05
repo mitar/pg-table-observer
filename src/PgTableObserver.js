@@ -35,7 +35,6 @@ class PgTableObserver {
   async _initTriggerFunc() {
     let trigger_sql = triggerSql(this.trigger_func, this.channel);
 
-    await this.db.none('DROP FUNCTION IF EXISTS $1~() CASCADE', this.trigger_func);
     await this.db.none(trigger_sql);
   }
 
@@ -196,20 +195,21 @@ class PgTableObserver {
 
     // Attach trigger to tables
 
-    const drop_trigger_sql = 'DROP TRIGGER IF EXISTS $1~ ON $2~';
-
     let channel = this.channel;
 
     let promises = tables.map(async table => {
       if(!(table in table_cbs)) {
         var trigger_name = `${channel}_${table}`;
 
-        await db.none(drop_trigger_sql, [ trigger_name, table ]);
-        await db.none(`
-          CREATE TRIGGER $1~
-          AFTER INSERT OR UPDATE OR DELETE ON $2~
-          FOR EACH ROW EXECUTE PROCEDURE $3~()
-        `, [ trigger_name, table, this.trigger_func ]);
+        try {
+          await db.none(`
+            CREATE TRIGGER $1~
+            AFTER INSERT OR UPDATE OR DELETE ON $2~
+            FOR EACH ROW EXECUTE PROCEDURE $3~()
+          `, [ trigger_name, table, this.trigger_func ]);
+        }
+        // Ignoring errors.
+        catch (error) {}
 
         table_cbs[table] = [ callback ];
       }
@@ -232,7 +232,7 @@ class PgTableObserver {
 
             var trigger_name = `${channel}_${table}`;
 
-            await db.none(drop_trigger_sql, [ trigger_name, table ]);
+            await db.none('DROP TRIGGER IF EXISTS $1~ ON $2~', [ trigger_name, table ]);
           }
         });
 
@@ -338,7 +338,7 @@ function triggerSql(function_name, channel) {
      * funName: name of function to create/replace
      * channel: NOTIFY channel on which to broadcast changes
      */
-    CREATE FUNCTION "${function_name}"() RETURNS trigger AS $$
+    CREATE OR REPLACE FUNCTION "${function_name}"() RETURNS trigger AS $$
       DECLARE
         row_data   RECORD;
         full_msg   TEXT;
